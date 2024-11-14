@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Azure AD Auth Test</title>
+    <script src="https://alcdn.msauth.net/browser/2.30.0/js/msal-browser.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        button { 
+            padding: 10px 20px;
+            margin: 5px;
+            cursor: pointer;
+        }
+        #userInfo {
+            margin-top: 20px;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            display: none;
+        }
+        pre {
+            background-color: #f5f5f5;
+            padding: 10px;
+            border-radius: 4px;
+            overflow-x: auto;
+        }
+    </style>
+</head>
+<body>
+    <h1>Azure AD Authentication</h1>
+    <button id="loginButton">Sign In</button>
+    <button id="logoutButton" style="display:none;">Sign Out</button>
+    <button id="callGraphButton" style="display:none;">Call MS Graph</button>
+    
+    <div id="userInfo"></div>
+    <pre id="graphData"></pre>
+
+    <script>
+        const msalConfig = {
+            auth: {
+                clientId: "d74c374a-fcf8-488f-ac55-738fdbef5ba2",// d74c374a-fcf8-488f-ac55-738fdbef5ba2
+                authority: "https://login.microsoftonline.com/e17d1063-88c2-4368-9d08-203b84a1bb40",
+                redirectUri: "https://4azurewebapp-hfcuahashkdydcdk.canadacentral-01.azurewebsites.net/",
+            },
+            cache: {
+                cacheLocation: "sessionStorage",
+                storeAuthStateInCookie: true
+            }
+        };
+
+        const msalInstance = new msal.PublicClientApplication(msalConfig);
+
+        const loginRequest = {
+            scopes: ["openid", "profile", "email"]
+        };
+
+        window.addEventListener('load', async () => {
+            const accounts = msalInstance.getAllAccounts();
+            if (accounts.length > 0) {
+                msalInstance.setActiveAccount(accounts[0]);
+                updateUI(accounts[0]);
+            }
+
+            try {
+                const response = await msalInstance.handleRedirectPromise();
+                if (response) {
+                    handleResponse(response);
+                }
+            } catch (error) {
+                console.error("Error handling redirect:", error);
+            }
+        });
+
+        async function signIn() {
+            try {
+                const response = await msalInstance.loginPopup(loginRequest);
+                handleResponse(response);
+            } catch (error) {
+                console.error("Error during sign in:", error);
+            }
+        }
+
+        async function signOut() {
+            try {
+                const account = msalInstance.getActiveAccount();
+                if (account) {
+                    await msalInstance.logoutPopup({
+                        account: account,
+                        postLogoutRedirectUri: window.location.origin
+                    });
+                    updateUIOnSignOut();
+                }
+            } catch (error) {
+                console.error("Error during sign out:", error);
+            }
+        }
+
+        function handleResponse(response) {
+            if (response !== null) {
+                msalInstance.setActiveAccount(response.account);
+                updateUI(response.account);
+            }
+        }
+
+        function updateUI(account) {
+            document.getElementById('loginButton').style.display = 'none';
+            document.getElementById('logoutButton').style.display = 'inline';
+            document.getElementById('callGraphButton').style.display = 'inline';
+            
+            const userInfo = document.getElementById('userInfo');
+            userInfo.style.display = 'block';
+            userInfo.innerHTML = `
+                <h2>Welcome ${account.name}</h2>
+                <p>Username: ${account.username}</p>
+                <p>Account ID: ${account.localAccountId}</p>
+            `;
+        }
+
+        function updateUIOnSignOut() {
+            document.getElementById('loginButton').style.display = 'inline';
+            document.getElementById('logoutButton').style.display = 'none';
+            document.getElementById('callGraphButton').style.display = 'none';
+            document.getElementById('userInfo').style.display = 'none';
+            document.getElementById('graphData').textContent = '';
+        }
+
+        async function callMSGraph() {
+            try {
+                const account = msalInstance.getActiveAccount();
+                if (!account) {
+                    throw new Error("No active account");
+                }
+
+                const response = await msalInstance.acquireTokenSilent({
+                    ...loginRequest,
+                    account: account
+                });
+
+                const graphResponse = await fetch("https://graph.microsoft.com/v1.0/me", {
+                    headers: {
+                        'Authorization': `Bearer ${response.accessToken}`
+                    }
+                });
+
+                const data = await graphResponse.json();
+                document.getElementById('graphData').textContent = JSON.stringify(data, null, 2);
+            } catch (error) {
+                console.error("Error calling MS Graph:", error);
+                if (error instanceof msal.InteractionRequiredAuthError) {
+                    await signIn();
+                }
+            }
+        }
+
+        document.getElementById('loginButton').onclick = signIn;
+        document.getElementById('logoutButton').onclick = signOut;
+        document.getElementById('callGraphButton').onclick = callMSGraph;
+    </script>
+</body>
+</html>
